@@ -40,3 +40,28 @@ jobs:
           jf rt build-add-git
           # Publish build info
           jf rt build-publish
+      - name: Escanear la imagen de Docker con Xray
+        env:
+          IMAGE_NAME: samaelxray.jfrog.io/test-docker/jfrog-docker-example-image:${{ github.run_number }}
+        id: xray_scan
+        run: |
+          jfrog rt docker-scan $IMAGE_NAME
+ 
+      - name: Generar reporte de vulnerabilidades
+        env:
+          IMAGE_NAME: samaelxray.jfrog.io/test-docker/jfrog-docker-example-image:${{ github.run_number }}
+        run: |
+          # Generar un reporte del resultado del escaneo.
+          # La JFrog CLI no tiene un comando directo para "reporte" de vulnerabilidades de una imagen escaneada en un solo paso.
+          # En su lugar, el escaneo (`docker-scan`) muestra el resultado en la salida estándar.
+          # Puedes capturar esta salida y guardarla en un archivo o utilizar la API de JFrog para generar reportes más complejos.
+          # Ejemplo de cómo guardar el output del escaneo a un archivo:
+          echo "Generando reporte..."
+          jfrog rt audit $IMAGE_NAME > xray-report.json
+          cat xray-report.json
+ 
+      - name: Subir el reporte como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: xray-report
+          path: xray-report.json
