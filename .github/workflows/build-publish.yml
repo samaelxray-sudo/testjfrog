@@ -40,6 +40,7 @@ jobs:
           jf rt build-add-git
           # Publish build info
           jf rt build-publish
+          jf rt build-scan
       - name: Escanear la imagen de Docker con Xray
         env:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker/jfrog-docker-example-image:${{ github.run_number }}
