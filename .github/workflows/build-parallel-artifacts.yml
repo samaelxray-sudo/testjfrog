@@ -39,7 +39,7 @@ jobs:
         env:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker/${{ matrix.image }}:${{ github.run_number }}
         run: |
-          jf rt bce --vcs-url="https://github.com/samaelxray-sudo/testjfrog.git" --vcs-revision="${GITHUB_SHA}" my-build ${{ github.run_number }}
+          jf rt bce my-build ${{ github.run_number }} --disable-vcs=true
           jf rt bag my-build ${{ github.run_number }} $IMAGE_NAME
           jf rt bp --dry-run my-build ${{ github.run_number }}
 
