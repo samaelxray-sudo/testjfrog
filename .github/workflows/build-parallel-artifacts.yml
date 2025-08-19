@@ -53,7 +53,7 @@ jobs:
           
           echo "Push de la imagen a Artifactory, vinculada al build-info"
           jfrog rt docker-push $IMAGE_NAME test-docker-local \
-            --build-name=my-build --build-number=${{ github.run_number }}
+            --build-name=my-build-${{ matrix.image }} --build-number=${{ github.run_number }}
 
       - name: Publish partial build-info
         run: |
