@@ -15,7 +15,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
- 
+
+      - name: Cache JFrog CLI
+        id: cache-jfrog-cli
+        uses: actions/cache@v3
+        with:
+          path: ~/.jfrog
+          key: ${{ runner.os }}-jfrog-cli-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-jfrog-cli-
+
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
         env:
@@ -31,30 +40,19 @@ jobs:
           jf docker build -t $IMAGE_NAME .
           jf docker push $IMAGE_NAME --build-name=my-build --build-number=${{ github.run_id }}
 
-      - name: Collect and save build info
-        run: |
-          jfrog rt build-collect my-build ${{ github.run_id }}
-          jfrog rt build-info my-build ${{ github.run_id }} > build_info_${{ matrix.image }}.json
- 
-      - name: Upload build info artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-info-files
-          path: build_info_${{ matrix.image }}.json
-
-  aggregate-build:
+  publish-build:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download build info artifacts
-        uses: actions/download-artifact@v4
+      - name: Cache JFrog CLI
+        id: cache-jfrog-cli
+        uses: actions/cache@v3
         with:
-          name: build-info-files
-          path: .
-
-      - name: Checkout code
-        uses: actions/checkout@v3
- 
+          path: ~/.jfrog
+          key: ${{ runner.os }}-jfrog-cli-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-jfrog-cli-
+    
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
         env:
@@ -63,5 +61,4 @@ jobs:
  
       - name: Publish final build info
         run: |
-          jfrog rt build-merge --build-name=my-build --build-number=${{ github.run_id }} --sources=*.json
           jfrog rt build-publish my-build ${{ github.run_id }}
