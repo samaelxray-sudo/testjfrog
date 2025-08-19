@@ -40,6 +40,10 @@ jobs:
           jf docker build -t $IMAGE_NAME .
           jf docker push $IMAGE_NAME --build-name=my-build --build-number=${{ github.run_id }}
 
+      - name: Debug cache jfrog
+        run: |
+          ls -lhA ~/.jfrog
+
   publish-build:
     needs: build
     runs-on: ubuntu-latest
@@ -58,6 +62,10 @@ jobs:
         env:
           JF_URL: ${{ vars.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+          
+      - name: Debug cache jfrog
+        run: |
+          ls -lhA ~/.jfrog
  
       - name: Publish final build info
         run: |
