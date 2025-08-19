@@ -40,15 +40,18 @@ jobs:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker/${{ matrix.image }}:${{ github.run_number }}
         run: |
           # Recolecta variables de entorno
+          echo "jfrog rt bce my-build ${{ github.run_number }}"
           jfrog rt bce my-build ${{ github.run_number }}
 
           # Push de la imagen a Artifactory, vinculada al build-info
+          echo "Push de la imagen a Artifactory, vinculada al build-info"
           jfrog rt docker-push $IMAGE_NAME \
             test-docker \
             --build-name=my-build \
             --build-number=${{ github.run_number }}
 
           # Guardar metadata parcial (sin publicar aún)
+          echo "Guardar metadata parcial (sin publicar aún)"
           jfrog rt bpr my-build ${{ github.run_number }}
 
   publish-build:
