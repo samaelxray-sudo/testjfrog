@@ -45,7 +45,7 @@ jobs:
           jfrog rt build-info my-build ${{ github.run_id }} --json > build_info_${{ matrix.image }}.json
  
       - name: Upload build info artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: build-info-files
           path: build_info_${{ matrix.image }}.json
@@ -56,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download build info artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: build-info-files
           path: .
