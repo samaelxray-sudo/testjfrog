@@ -15,8 +15,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0   # descarga el historial completo para que exista .git
 
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
@@ -41,7 +39,7 @@ jobs:
         env:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker/${{ matrix.image }}:${{ github.run_number }}
         run: |
-          jf rt bce my-build ${{ github.run_number }}
+          jf rt bce my-build ${{ github.run_number }} --vcs-url="https://github.com/samaelxray-sudo/testjfrog.git" --vcs-revision="${GITHUB_SHA}"
           jf rt bag my-build ${{ github.run_number }} $IMAGE_NAME
           jf rt bp --dry-run my-build ${{ github.run_number }}
 
