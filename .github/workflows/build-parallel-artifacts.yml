@@ -38,7 +38,7 @@ jobs:
           jf docker login samaelxray.jfrog.io -u samaelxray@gmail.com -p ${{ secrets.JF_ACCESS_TOKEN }}
           cd microservices/${{ matrix.image }}
           jf docker build -t $IMAGE_NAME .
-          jfrog rt docker push $IMAGE_NAME --build-name=my-build --build-number=${{ github.run_id }} --module=${{ matrix.image }}
+          jfrog docker push $IMAGE_NAME --build-name=my-build --build-number=${{ github.run_id }} --module=${{ matrix.image }}
 
       - name: Export build info to file
         run: |
