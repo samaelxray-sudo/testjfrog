@@ -15,15 +15,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
+        
+      - name: Create JFrog CLI home directory
+        run: mkdir -p ./jfrog-cli-home-dir
+ 
       - name: Cache JFrog CLI
-        id: cache-jfrog-cli
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
-          path: ~/.jfrog
+          path: ./jfrog-cli-home-dir
           key: ${{ runner.os }}-jfrog-cli-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-jfrog-cli-
 
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
@@ -31,7 +31,10 @@ jobs:
           JF_URL: ${{ vars.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
 
-      - name: Build and push Docker image with build info
+      - name: Set JFROG_CLI_HOME_DIR environment variable
+        run: echo "JFROG_CLI_HOME_DIR=./jfrog-cli-home-dir" >> $GITHUB_ENV
+ 
+      - name: Build and push Docker image
         env:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker/${{ matrix.image }}:${{ github.run_number }}
         run: |
@@ -40,24 +43,18 @@ jobs:
           jf docker build -t $IMAGE_NAME .
           jf docker push $IMAGE_NAME --build-name=my-build --build-number=${{ github.run_id }} --module=${{ matrix.image }}
 
-      - name: Export build info to file
-        run: |
-          jf rt build-publish my-build ${{ github.run_id }} > build_info_${{ matrix.image }}.json
-          cat build_info_${{ matrix.image }}.json
- 
-      - name: Upload build info artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-info-${{ matrix.image }}
-          path: build_info_${{ matrix.image }}.json
-
-
   publish-build:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download all build info artifacts
-        uses: actions/download-artifact@v4
+      - name: Create JFrog CLI home directory
+        run: mkdir -p ./jfrog-cli-home-dir
+ 
+      - name: Cache JFrog CLI
+        uses: actions/cache@v4
+        with:
+          path: ./jfrog-cli-home-dir
+          key: ${{ runner.os }}-jfrog-cli-${{ github.run_id }}
           
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
@@ -65,15 +62,10 @@ jobs:
           JF_URL: ${{ vars.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
           
-      - name: Merge and publish build info
+      - name: Set JFROG_CLI_HOME_DIR environment variable
+        run: echo "JFROG_CLI_HOME_DIR=./jfrog-cli-home-dir" >> $GITHUB_ENV
+ 
+      - name: Publish final build info
         run: |
-          # Instalar 'jq' para manipular JSON
-          sudo apt-get install jq -y
-          
-          # Fusionar los archivos JSON
-          jq -s 'reduce .[] as $item ({}; .artifacts += $item.artifacts)' build-info-*/build_info_*.json > merged-build-info.json
-          cat merged-build-info.json
-          
-          # Publicar la build consolidada usando el archivo JSON
-          jfrog rt build-publish my-build ${{ github.run_id }} --from-file=merged-build-info.json
+          jf rt build-publish my-build ${{ github.run_id }}
  
