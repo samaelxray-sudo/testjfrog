@@ -43,6 +43,7 @@ jobs:
             test-docker-local \
             --build-name=my-build \
             --build-number=${{ github.run_number }}
+          # Dry run to test
           jfrog rt build-publish my-build ${{ github.run_number }} --dry-run
 
       - name: Save JFrog build-info files
