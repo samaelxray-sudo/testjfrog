@@ -67,6 +67,9 @@ jobs:
           
       - name: Merge and publish build info
         run: |
+          # Lista los ficheros descargados
+          ls -lhA .
+          
           # Instalar 'jq' para manipular JSON
           sudo apt-get install jq -y
           
