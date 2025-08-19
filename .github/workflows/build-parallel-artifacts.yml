@@ -24,14 +24,14 @@ jobs:
 
       - name: Build Docker image
         env:
-          IMAGE_NAME: samaelxray.jfrog.io/test-docker/${{ matrix.image }}:${{ github.run_number }}
+          IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
         run: |
           jf docker login samaelxray.jfrog.io -u samaelxray@gmail.com -p ${{ secrets.JF_ACCESS_TOKEN }}
           jf docker build -t $IMAGE_NAME ./microservices/${{ matrix.image }}
 
       - name: Push Docker image and collect build-info
         env:
-          IMAGE_NAME: samaelxray.jfrog.io/test-docker/${{ matrix.image }}:${{ github.run_number }}
+          IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
         run: |
           # Recolecta variables de entorno
           echo "jfrog rt bce my-build ${{ github.run_number }}"
@@ -40,9 +40,10 @@ jobs:
           # Push de la imagen a Artifactory, vinculada al build-info
           echo "Push de la imagen a Artifactory, vinculada al build-info"
           jfrog rt docker-push $IMAGE_NAME \
-            test-docker \
+            test-docker-local \
             --build-name=my-build \
             --build-number=${{ github.run_number }}
+          jfrog rt build-publish my-build ${{ github.run_number }} --dry-run
 
       - name: Save JFrog build-info files
         uses: actions/upload-artifact@v4
