@@ -74,7 +74,7 @@ jobs:
           sudo apt-get install jq -y
           
           # Fusionar los archivos JSON
-          jq -s 'reduce .[] as $item ({}; .artifacts += $item.artifacts)' build_info_*.json > merged-build-info.json
+          jq -s 'reduce .[] as $item ({}; .artifacts += $item.artifacts)' build_info_*/*.json > merged-build-info.json
           cat merged-build-info.json
           
           # Publicar la build consolidada usando el archivo JSON
