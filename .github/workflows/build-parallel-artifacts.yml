@@ -31,42 +31,50 @@ jobs:
           JF_URL: ${{ vars.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
 
-      - name: Build Tag and push Docker Image
+      - name: Build and push Docker image with build info
         env:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker/${{ matrix.image }}:${{ github.run_number }}
         run: |
           jf docker login samaelxray.jfrog.io -u samaelxray@gmail.com -p ${{ secrets.JF_ACCESS_TOKEN }}
           cd microservices/${{ matrix.image }}
           jf docker build -t $IMAGE_NAME .
-          jf docker push $IMAGE_NAME --build-name=my-build --build-number=${{ github.run_id }}
+          jfrog rt docker push $IMAGE_NAME --build-name=my-build --build-number=${{ github.run_id }} --module=${{ matrix.image }}
 
-      - name: Debug cache jfrog
+      - name: Export build info to file
         run: |
-          ls -lhA ~/.jfrog
+          jfrog rt build-info my-build ${{ github.run_id }} --json > build_info_${{ matrix.image }}.json
+ 
+      - name: Upload build info artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-info-files
+          path: build_info_${{ matrix.image }}.json
+
 
   publish-build:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Cache JFrog CLI
-        id: cache-jfrog-cli
-        uses: actions/cache@v3
+      - name: Download build info artifacts
+        uses: actions/download-artifact@v3
         with:
-          path: ~/.jfrog
-          key: ${{ runner.os }}-jfrog-cli-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-jfrog-cli-
-    
+          name: build-info-files
+          path: .
+          
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
         env:
           JF_URL: ${{ vars.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
           
-      - name: Debug cache jfrog
+      - name: Merge and publish build info
         run: |
-          ls -lhA ~/.jfrog
+          # Instalar 'jq' para manipular JSON
+          sudo apt-get install jq -y
+          
+          # Fusionar los archivos JSON
+          jq -s 'reduce .[] as $item ({}; .artifacts += $item.artifacts)' build_info_*.json > merged-build-info.json
+          
+          # Publicar la build consolidada usando el archivo JSON
+          jfrog rt build-publish my-build ${{ github.run_id }} --from-file=merged-build-info.json
  
-      - name: Publish final build info
-        run: |
-          jfrog rt build-publish my-build ${{ github.run_id }}
