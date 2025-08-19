@@ -35,13 +35,21 @@ jobs:
         run: |
           jf docker push $IMAGE_NAME
 
-      - name: Collect build-info
+      - name: Push Docker image and collect build-info
         env:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker/${{ matrix.image }}:${{ github.run_number }}
         run: |
-          jf rt bce my-build ${{ github.run_number }} --disable-vcs=true
-          jf rt bag my-build ${{ github.run_number }} $IMAGE_NAME
-          jf rt bp --dry-run my-build ${{ github.run_number }}
+          # Recolecta variables de entorno
+          jfrog rt bce my-build ${{ github.run_number }}
+
+          # Push de la imagen a Artifactory, vinculada al build-info
+          jfrog rt docker-push $IMAGE_NAME \
+            test-docker \
+            --build-name=my-build \
+            --build-number=${{ github.run_number }}
+
+          # Guardar metadata parcial (sin publicar aún)
+          jfrog rt bpr my-build ${{ github.run_number }}
 
   publish-build:
     needs: build
