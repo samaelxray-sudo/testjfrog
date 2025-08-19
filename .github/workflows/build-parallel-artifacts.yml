@@ -15,15 +15,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        
-      - name: Create JFrog CLI home directory
-        run: mkdir -p ./jfrog-cli-home-dir
- 
-      - name: Cache JFrog CLI
-        uses: actions/cache@v4
-        with:
-          path: ./jfrog-cli-home-dir
-          key: ${{ runner.os }}-jfrog-cli-${{ github.run_id }}
 
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
@@ -31,30 +22,30 @@ jobs:
           JF_URL: ${{ vars.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
 
-      - name: Set JFROG_CLI_HOME_DIR environment variable
-        run: echo "JFROG_CLI_HOME_DIR=./jfrog-cli-home-dir" >> $GITHUB_ENV
- 
-      - name: Build and push Docker image
+      - name: Build Docker image
         env:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker/${{ matrix.image }}:${{ github.run_number }}
         run: |
-          jf docker login samaelxray.jfrog.io -u samaelxray@gmail.com -p ${{ secrets.JF_ACCESS_TOKEN }}
-          cd microservices/${{ matrix.image }}
-          jf docker build -t $IMAGE_NAME .
-          jf docker push $IMAGE_NAME --build-name=my-build --build-number=${{ github.run_id }} --module=${{ matrix.image }}
+          jf docker build -t $IMAGE_NAME ./microservices/${{ matrix.image }}
+
+      - name: Push Docker image
+        env:
+          IMAGE_NAME: samaelxray.jfrog.io/test-docker/${{ matrix.image }}:${{ github.run_number }}
+        run: |
+          jf docker push $IMAGE_NAME
+
+      - name: Collect build-info
+        env:
+          IMAGE_NAME: samaelxray.jfrog.io/test-docker/${{ matrix.image }}:${{ github.run_number }}
+        run: |
+          jf rt bce my-build ${{ github.run_number }}
+          jf rt bag my-build ${{ github.run_number }} $IMAGE_NAME
+          jf rt bp --dry-run my-build ${{ github.run_number }}
 
   publish-build:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Create JFrog CLI home directory
-        run: mkdir -p ./jfrog-cli-home-dir
- 
-      - name: Cache JFrog CLI
-        uses: actions/cache@v4
-        with:
-          path: ./jfrog-cli-home-dir
-          key: ${{ runner.os }}-jfrog-cli-${{ github.run_id }}
           
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
@@ -62,10 +53,6 @@ jobs:
           JF_URL: ${{ vars.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
           
-      - name: Set JFROG_CLI_HOME_DIR environment variable
-        run: echo "JFROG_CLI_HOME_DIR=./jfrog-cli-home-dir" >> $GITHUB_ENV
- 
-      - name: Publish final build info
+      - name: Publish final build
         run: |
-          jf rt build-publish my-build ${{ github.run_id }}
- 
+          jfrog rt bp my-build ${{ github.run_number }}
