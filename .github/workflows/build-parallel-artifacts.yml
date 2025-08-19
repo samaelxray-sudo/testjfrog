@@ -47,12 +47,19 @@ jobs:
           echo "Dry run to test"
           jfrog rt build-publish my-build ${{ github.run_number }} --dry-run
 
-      - name: Save JFrog build-info files
+      - name: Debug .jfrog
+        run: |
+          # Recolecta variables de entorno
+          ls -lhA ~/.jfrog
+          tree ~/.jfrog
+
+      - name: Save partial build-info
         uses: actions/upload-artifact@v4
         with:
-          name: jfrog-build-info-${{ matrix.service }}
+          name: jfrog-part-${{ matrix.service }}
           path: ~/.jfrog/
           retention-days: 1
+
   publish-build:
     needs: build
     runs-on: ubuntu-latest
@@ -63,12 +70,20 @@ jobs:
         env:
           JF_URL: ${{ vars.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-          
+
       - name: Download all JFrog build-info parts
         uses: actions/download-artifact@v4
         with:
-          path: ~/.jfrog/
+          path: jfrog-parts/
 
-      - name: Merge & Publish build-info
+      - name: Merge build-info from all jobs
         run: |
-          jfrog rt bp my-build ${{ github.run_number }}
+          # Cada servicio subió un artifact con su build-info parcial
+          for dir in jfrog-parts/*; do
+            echo "Appending build-info from $dir"
+            jfrog rt build-append my-build ${{ github.run_number }} --from=$dir
+          done
+
+      - name: Publish build-info
+        run: |
+          jfrog rt build-publish my-build ${{ github.run_number }}
