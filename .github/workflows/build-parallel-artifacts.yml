@@ -50,10 +50,6 @@ jobs:
             --build-name=my-build \
             --build-number=${{ github.run_number }}
 
-          # Guardar info en el cache local, sin publicar aún
-          echo "Guardar info en el cache local, sin publicar aún"
-          jfrog rt bp my-build ${{ github.run_number }} --skip-publish
-
       - name: Save JFrog build-info files
         uses: actions/upload-artifact@v4
         with:
