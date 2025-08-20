@@ -19,9 +19,9 @@ jobs:
         id: set-services
         run: |
           # 🔽 Aquí calculas tu lista dinámicamente
-          SERVICES="newimage-1 newimage-2 newimage-3"
+          SERVICES="image-1 image-2 image-3"
 
-          # Convertimos la lista a JSON: ["newimage-1","newimage-2","newimage-3"]
+          # Convertimos la lista a JSON: ["image-1","image-2","image-3"]
           SERVICES_JSON=$(printf '["%s"]' "$(echo $SERVICES | sed 's/ /","/g')")
 
           echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
@@ -51,7 +51,7 @@ jobs:
           IMAGE=${{ secrets.JF_URL }}/test-docker-local/${{ matrix.service }}:${{ github.run_number }}
           echo "Building $IMAGE_NAME"
           jf docker login samaelxray.jfrog.io -u samaelxray@gmail.com -p ${{ secrets.JF_ACCESS_TOKEN }}
-          jf docker build -t $IMAGE_NAME ./microservices/new${{ matrix.image }}
+          jf docker build -t $IMAGE_NAME ./microservices/${{ matrix.image }}
           jf docker push $IMAGE
 
       - name: Capture build-info (dry-run)
