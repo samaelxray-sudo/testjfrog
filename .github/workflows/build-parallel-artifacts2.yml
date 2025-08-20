@@ -48,11 +48,10 @@ jobs:
         env:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
         run: |
-          IMAGE=${{ secrets.JF_URL }}/test-docker-local/${{ matrix.service }}:${{ github.run_number }}
           echo "Building $IMAGE_NAME"
           jf docker login samaelxray.jfrog.io -u samaelxray@gmail.com -p ${{ secrets.JF_ACCESS_TOKEN }}
           jf docker build -t $IMAGE_NAME ./microservices/${{ matrix.image }}
-          jf docker push $IMAGE
+          jf docker push $IMAGE_NAME
 
       - name: Capture build-info (dry-run)
         env:
