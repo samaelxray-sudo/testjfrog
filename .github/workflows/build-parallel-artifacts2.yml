@@ -1,0 +1,103 @@
+name: Second WF Parallel Artifacts 
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-parallel-artifacts2.yml
+jobs:
+  discover-services:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.set-services.outputs.services }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Discover services dynamically
+        id: set-services
+        run: |
+          # 🔽 Aquí calculas tu lista dinámicamente
+          SERVICES="newimage-1 newimage-2 newimage-3"
+
+          # Convertimos la lista a JSON: ["newimage-1","newimage-2","newimage-3"]
+          SERVICES_JSON=$(printf '["%s"]' "$(echo $SERVICES | sed 's/ /","/g')")
+
+          echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
+          echo "Discovered services: $SERVICES_JSON"
+
+  build:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: discover-services
+    strategy:
+      matrix:
+        image: ${{ fromJson(needs.discover-services.outputs.services) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+
+      - name: Build and Push Docker image
+        env:
+          IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
+        run: |
+          IMAGE=${{ secrets.JF_URL }}/test-docker-local/${{ matrix.service }}:${{ github.run_number }}
+          echo "Building $IMAGE_NAME"
+          jf docker login samaelxray.jfrog.io -u samaelxray@gmail.com -p ${{ secrets.JF_ACCESS_TOKEN }}
+          jf docker build -t $IMAGE_NAME ./microservices/${{ matrix.image }}
+          jf docker push $IMAGE
+
+      - name: Capture build-info (dry-run)
+        env:
+          IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
+        run: |
+          jf rt bce new-build ${{ github.run_number }}
+          jf rt bdc new-build ${{ github.run_number }} $IMAGE_NAME --dry-run > build-info.json
+          cat build-info.json
+
+      - name: Upload build-info artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-info-${{ matrix.image }}
+          path: build-info.json
+
+  merge:
+    name: Merge build-infos and publish
+    runs-on: ubuntu-latest
+    needs: [discover-services, build]    
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+
+      - name: Download all build-info
+        uses: actions/download-artifact@v4
+        with:
+          path: build-infos
+
+      - name: Merge build-infos
+        run: |
+          pip install jq
+          cd build-infos
+          FILES=$(ls build-info-*/build-info.json)
+          echo "Merging: $FILES"
+          jq -s 'reduce .[] as $item (.; .modules += $item.modules)' $FILES > merged-build.json
+          cat merged-build.json
+
+      - name: Publish merged build-info
+        run: |
+          jf rt curl -XPUT /api/build \
+            -H "Content-Type: application/json" \
+            -T build-infos/merged-build.json
