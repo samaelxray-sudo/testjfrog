@@ -57,7 +57,12 @@ jobs:
         env:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
         run: |
+          # Collect environment variables
+          echo "Collect environment variables"
           jf rt bce new-build ${{ github.run_number }}
+
+          # Build docker create
+          echo "Build docker create"
           jf rt bdc new-build ${{ github.run_number }} $IMAGE_NAME --dry-run > build-info.json
           cat build-info.json
 
