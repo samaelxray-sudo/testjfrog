@@ -72,6 +72,22 @@ jobs:
           name: build-info-${{ matrix.image }}
           path: build-info.json
 
+      - name: Create image-file.txt with digest
+        env:
+          IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
+        run: |
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE_NAME)
+          echo $DIGEST > image-file.txt
+
+      - name: Add Docker image to Build Info
+        run: |
+          jf rt build-docker-create \
+            --image-file=image-file.txt \
+            --build-name=new-build \
+            --build-number=${{ github.run_number }} \
+            --module=${{ matrix.image }} \
+            test-docker-local
+
   merge:
     name: Merge build-infos and publish
     runs-on: ubuntu-latest
