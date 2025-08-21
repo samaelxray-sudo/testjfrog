@@ -1,4 +1,4 @@
-name: Second WF Parallel Artifacts
+name: Second WF Parallel Artifacts 
 
 on:
   push:
