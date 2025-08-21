@@ -53,40 +53,46 @@ jobs:
           jf docker build -t $IMAGE_NAME ./microservices/${{ matrix.image }}
           jf docker push $IMAGE_NAME
 
-      - name: Capture build-info (dry-run)
-        env:
-          IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
-        run: |
-          # Collect environment variables
-          echo "Collect environment variables"
-          jf rt bce new-build ${{ github.run_number }}
-
-          # Build docker create
-          echo "Build docker create"
-          jf rt bdc new-build ${{ github.run_number }} $IMAGE_NAME --dry-run > build-info.json
-          cat build-info.json
-
-      - name: Upload build-info artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-info-${{ matrix.image }}
-          path: build-info.json
-
       - name: Create image-file.txt with digest
         env:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
         run: |
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE_NAME)
-          echo $DIGEST > image-file.txt
+          # 3) Obtener el digest del MANIFEST (línea esperada por bdc: '<IMAGE>@sha256:<MANIFEST>')
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE}" | awk '/Digest:/ {print $2; exit}')"
+          if [ -z "${DIGEST}" ]; then
+            echo "No pude obtener el digest del manifest de ${IMAGE}"
+            exit 1
+          fi
+          echo "/************ Image ***********/"
+          echo "${IMAGE}@${DIGEST}"
+          echo "${IMAGE}@${DIGEST}" > image.txt
 
       - name: Add Docker image to Build Info
         run: |
-          jf rt build-docker-create \
-            --image-file=image-file.txt \
+          # 4) Registrar el módulo docker EN LOCAL en la misma build
+          #    (OJO: sintaxis correcta de 2.78.3: --image-file y al final el <target repo>)
+          jf rt bdc \
+            --image-file=image.txt \
             --build-name=new-build \
             --build-number=${{ github.run_number }} \
             --module=${{ matrix.image }} \
             test-docker-local
+
+          # (Opcional) Variables de entorno/VCS si quieres que salgan en la build:
+          # jf rt bce "${BUILD_NAME}" "${BUILD_NUMBER}"
+          # jf rt bag "${BUILD_NAME}" "${BUILD_NUMBER}" || true   # solo si hay .git, si no, ignora
+
+          # 5) Sacar el JSON previo de ESTA build local (contiene SOLO el módulo de este servicio)
+          mkdir -p jfrog-parts
+          jf rt bp new-build ${{ github.run_number }} --dry-run > "jfrog-parts/${{ matrix.image }}.json"
+
+          # 6) Subir el JSON como artefacto del job (actions/upload-artifact@v4)
+      - name: Upload partial build-info
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-info-${{ matrix.image }}
+          path: ./frog-parts/build-info-${{ matrix.image }}.json
+          retention-days: 1
 
   merge:
     name: Merge build-infos and publish
@@ -102,22 +108,27 @@ jobs:
           JF_URL: ${{ vars.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
 
-      - name: Download all build-info
+      - name: Download parts
         uses: actions/download-artifact@v4
         with:
-          path: build-infos
+          pattern: jfrog-part-*
+          merge-multiple: true
 
-      - name: Merge build-infos
+      - name: Merge modules
         run: |
-          pip install jq
-          cd build-infos
-          FILES=$(ls build-info-*/build-info.json)
-          echo "Merging: $FILES"
-          jq -s 'reduce .[] as $item (.; .modules += $item.modules)' $FILES > merged-build.json
-          cat merged-build.json
+          jq -s '{
+            name:       (.[0].name),
+            number:     (.[0].number),
+            started:    (.[0].started),
+            url:        (.[0].url),
+            agent:      (.[0].agent),
+            buildAgent: (.[0].buildAgent),
+            properties: (reduce .[].properties as $p ({}; . * ($p // {}))),
+            modules:    (map(.modules) | add)
+          }' jfrog-parts/*.json > merged.json
 
-      - name: Publish merged build-info
+      - name: Publish build-info
         run: |
-          jf rt curl -XPUT /api/build \
+          jf rt curl -X PUT "/api/build" \
             -H "Content-Type: application/json" \
-            -T build-infos/merged-build.json
+            -T merged.json
