@@ -90,7 +90,7 @@ jobs:
       - name: Upload partial build-info
         uses: actions/upload-artifact@v4
         with:
-          name: build-info-${{ matrix.image }}
+          name: jfrog-part-${{ matrix.image }}
           path: ./frog-parts/build-info-${{ matrix.image }}.json
           retention-days: 1
 
