@@ -118,6 +118,8 @@ jobs:
 
       - name: Merge modules
         run: |
+          ls -lhA *
+          ls -lhA jfrog-parts/*
           jq -s '{
             name:       (.[0].name),
             number:     (.[0].number),
@@ -127,7 +129,7 @@ jobs:
             buildAgent: (.[0].buildAgent),
             properties: (reduce .[].properties as $p ({}; . * ($p // {}))),
             modules:    (map(.modules) | add)
-          }' jfrog-parts/*.json > merged.json
+          }' *.json > merged.json
 
       - name: Publish build-info
         run: |
