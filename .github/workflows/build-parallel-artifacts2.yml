@@ -118,8 +118,6 @@ jobs:
 
       - name: Merge modules
         run: |
-          ls -lhA *
-          ls -lhA jfrog-parts/*
           jq -s '{
             name:       (.[0].name),
             number:     (.[0].number),
