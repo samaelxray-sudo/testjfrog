@@ -134,3 +134,34 @@ jobs:
           jf rt curl -X PUT "/api/build" \
             -H "Content-Type: application/json" \
             -T merged.json
+            
+      - name: Xray scan (JSON) y SBOM (CycloneDX)
+        env:
+          BUILD_NAME: new-buid
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          # Reporte de seguridad (JSON) + licencias
+          jf bs "$BUILD_NAME" "$BUILD_NUMBER" --vuln --licenses --format=json --fail=false > build-security.json
+
+          # SBOM en formato CycloneDX (JSON)
+          jf bs "$BUILD_NAME" "$BUILD_NUMBER" --format=cyclonedx --fail=false > build-sbom.cdx.json
+      
+      - name: Subir artefactos (reporte y SBOM)
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ env.BUILD_NAME }}-${{ env.BUILD_NUMBER }}-xray-and-sbom"
+          path: |
+            build-security.json
+            build-sbom.cdx.json
+          retention-days: 14
+
+      - name: Resumen rápido en el Job Summary
+        env:
+          BUILD_NAME: new-buid
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          {
+            echo "### Xray para $BUILD_NAME/$BUILD_NUMBER";
+            echo "- Reporte (JSON): \`build-security.json\`";
+            echo "- SBOM CycloneDX (JSON): \`build-sbom.cdx.json\`";
+          } >> "$GITHUB_STEP_SUMMARY"
