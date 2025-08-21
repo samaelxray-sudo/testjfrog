@@ -84,7 +84,11 @@ jobs:
 
           # 5) Sacar el JSON previo de ESTA build local (contiene SOLO el módulo de este servicio)
           mkdir -p jfrog-parts
+          echo "Sacar el JSON previo de ESTA build local (contiene SOLO el módulo de este servicio)"
+          jf rt bp new-build ${{ github.run_number }} --dry-run
           jf rt bp new-build ${{ github.run_number }} --dry-run > "jfrog-parts/${{ matrix.image }}.json"
+          ls -lhA jfrog-parts/
+          cat jfrog-parts/${{ matrix.image }}.json
 
           # 6) Subir el JSON como artefacto del job (actions/upload-artifact@v4)
       - name: Upload partial build-info
