@@ -140,8 +140,8 @@ jobs:
           BUILD_NAME: new-buid
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          # Reporte de seguridad (JSON) + licencias
-          jf bs "$BUILD_NAME" "$BUILD_NUMBER" --vuln --licenses --format=json --fail=false > build-security.json
+          # Reporte de seguridad (JSON) 
+          jf bs "$BUILD_NAME" "$BUILD_NUMBER" --vuln --format=json --fail=false > build-security.json
 
           # SBOM en formato CycloneDX (JSON)
           jf bs "$BUILD_NAME" "$BUILD_NUMBER" --format=cyclonedx --fail=false > build-sbom.cdx.json
