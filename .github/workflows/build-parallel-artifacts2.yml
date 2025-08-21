@@ -58,14 +58,14 @@ jobs:
           IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
         run: |
           # 3) Obtener el digest del MANIFEST (línea esperada por bdc: '<IMAGE>@sha256:<MANIFEST>')
-          DIGEST="$(docker buildx imagetools inspect "${IMAGE}" | awk '/Digest:/ {print $2; exit}')"
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE_NAME}" | awk '/Digest:/ {print $2; exit}')"
           if [ -z "${DIGEST}" ]; then
             echo "No pude obtener el digest del manifest de ${IMAGE}"
             exit 1
           fi
           echo "/************ Image ***********/"
-          echo "${IMAGE}@${DIGEST}"
-          echo "${IMAGE}@${DIGEST}" > image.txt
+          echo "${IMAGE_NAME}@${DIGEST}"
+          echo "${IMAGE_NAME}@${DIGEST}" > image.txt
 
       - name: Add Docker image to Build Info
         run: |
