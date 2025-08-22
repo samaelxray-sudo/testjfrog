@@ -140,8 +140,6 @@ jobs:
           BUILD_NAME: new-buid
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          # Espero a que complete el reporte
-          sleep 360
           # Reporte de seguridad (JSON) 
           jf bs "$BUILD_NAME" "$BUILD_NUMBER" --vuln --format=json --fail=false > build-security.json
 
