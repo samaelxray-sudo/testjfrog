@@ -137,7 +137,7 @@ jobs:
             
       - name: Xray scan (JSON) y SBOM (CycloneDX)
         env:
-          BUILD_NAME: new-buid
+          BUILD_NAME: new-build
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
           # Reporte de seguridad (JSON) 
@@ -157,7 +157,7 @@ jobs:
 
       - name: Resumen rápido en el Job Summary
         env:
-          BUILD_NAME: new-buid
+          BUILD_NAME: new-build
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
           {
