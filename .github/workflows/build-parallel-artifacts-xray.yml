@@ -1,207 +1,129 @@
-name: Parallel Docker Build + Xray Reports
+name: Build and Scan with JFrog
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
-    paths:
-      - .github/workflows/build-parallel-artifacts-xray.yml
+    branches:
+      - main
 
 env:
+  JF_URL: ${{ secrets.JF_URL }}
+  JF_USER: ${{ secrets.JF_USER }}
+  JF_PASSWORD: ${{ secrets.JF_PASSWORD }}
   BUILD_NAME: new-build
   BUILD_NUMBER: ${{ github.run_number }}
+  DOCKER_REPO: test-docker-local
+  SERVICES: "service1 service2 service3"
 
 jobs:
-  discover-services:
-    runs-on: ubuntu-latest
-    outputs:
-      services: ${{ steps.set-services.outputs.services }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: set-services
-        run: |
-          SERVICES="image-1 image-2 image-3"
-          SERVICES_JSON=$(printf '["%s"]' "$(echo $SERVICES | sed 's/ /","/g')")
-          echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
-          echo "Discovered services: $SERVICES_JSON"
-
   build:
-    name: Build ${{ matrix.image }}
     runs-on: ubuntu-latest
-    needs: discover-services
     strategy:
       matrix:
-        image: ${{ fromJson(needs.discover-services.outputs.services) }}
-    env:
-      IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
+        service: ${{ fromJson('["service1","service2","service3"]') }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: jfrog/setup-jfrog-cli@v4
-        env:
-          JF_URL: ${{ vars.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
 
-      - name: Build & Push Docker image
+      - name: Configure JFrog
+        run: jf c add --url $JF_URL --user $JF_USER --password $JF_PASSWORD --interactive=false
+
+      - name: Build and push Docker image
         run: |
           set -euo pipefail
-          jf docker login samaelxray.jfrog.io -u samaelxray@gmail.com -p ${{ secrets.JF_ACCESS_TOKEN }}
-          jf docker build -t "$IMAGE_NAME" ./microservices/${{ matrix.image }}
-          jf docker push "$IMAGE_NAME"
+          IMAGE=${{ matrix.service }}
+          docker build -t $JF_URL/$DOCKER_REPO/$IMAGE:$BUILD_NUMBER $IMAGE
+          docker push $JF_URL/$DOCKER_REPO/$IMAGE:$BUILD_NUMBER
+          jf rt bdc $DOCKER_REPO \
+            --image-file=<(echo "$JF_URL/$DOCKER_REPO/$IMAGE:$BUILD_NUMBER@$(docker inspect --format='{{index .RepoDigests 0}}' $JF_URL/$DOCKER_REPO/$IMAGE:$BUILD_NUMBER | cut -d'@' -f2)") \
+            --build-name=$BUILD_NAME --build-number=$BUILD_NUMBER --module=$IMAGE
 
-      - name: Create digest file
-        run: |
-          set -euo pipefail
-          DIGEST=$(docker buildx imagetools inspect "$IMAGE_NAME" | awk '/Digest:/ {print $2; exit}')
-          [ -z "$DIGEST" ] && { echo "❌ No digest for $IMAGE_NAME"; exit 1; }
-          echo "$IMAGE_NAME@$DIGEST" | tee image.txt
+      - name: Collect environment
+        run: jf rt bce $BUILD_NAME $BUILD_NUMBER
 
-      - name: Add Docker image to build-info
-        run: |
-          jf rt bdc \
-            --image-file=image.txt \
-            --build-name=$BUILD_NAME \
-            --build-number=$BUILD_NUMBER \
-            --module=${{ matrix.image }} \
-            test-docker-local
-
-          mkdir -p jfrog-parts
-          jf rt bp $BUILD_NAME $BUILD_NUMBER --dry-run > "jfrog-parts/${{ matrix.image }}.json"
+      - name: Save build-info part
+        run: jf rt bp $BUILD_NAME $BUILD_NUMBER --dry-run > ${{ matrix.service }}-build-info.json
 
       - uses: actions/upload-artifact@v4
         with:
-          name: jfrog-part-${{ matrix.image }}
-          path: jfrog-parts/${{ matrix.image }}.json
-          retention-days: 1
+          name: jfrog-parts
+          path: ${{ matrix.service }}-build-info.json
 
-  merge:
-    name: Merge & Publish build-info
+  publish:
     runs-on: ubuntu-latest
-    needs: [discover-services, build]
-    env:
-      REPORT_DIR: reports
+    needs: build
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: jfrog/setup-jfrog-cli@v4
-        env:
-          JF_URL: ${{ vars.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-
       - uses: actions/download-artifact@v4
         with:
-          pattern: jfrog-part-*
-          merge-multiple: true
+          name: jfrog-parts
 
-      - name: Merge partial build-infos
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+
+      - name: Configure JFrog
+        run: jf c add --url $JF_URL --user $JF_USER --password $JF_PASSWORD --interactive=false
+
+      - name: Merge and publish build-info
         run: |
-          jq -s '{
-            name: (.[0].name),
-            number: (.[0].number),
-            started: (.[0].started),
-            url: (.[0].url),
-            agent: (.[0].agent),
-            buildAgent: (.[0].buildAgent),
-            properties: (reduce .[].properties as $p ({}; . * ($p // {}))),
-            modules: (map(.modules) | add)
-          }' *.json > merged.json
-
-      - name: Publish build-info
-        run: jf rt curl -X PUT "/api/build" -H "Content-Type: application/json" -T merged.json
-
-      - name: Run Xray scan + SBOM
-        run: |
-          mkdir -p $REPORT_DIR
-          jf bs "$BUILD_NAME" "$BUILD_NUMBER" --vuln --format=json --fail=false > $REPORT_DIR/security.json
-          jf bs "$BUILD_NAME" "$BUILD_NUMBER" --format=cyclonedx --fail=false > $REPORT_DIR/sbom.cdx.json
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: "${{ env.BUILD_NAME }}-${{ env.BUILD_NUMBER }}-xray-sbom"
-          path: ${{ env.REPORT_DIR }}/*
-          retention-days: 14
-
-      - name: Job Summary
-        run: |
-          {
-            echo "### Xray for $BUILD_NAME/$BUILD_NUMBER"
-            echo "- Security report: \`reports/security.json\`"
-            echo "- SBOM (CycloneDX): \`reports/sbom.cdx.json\`"
-          } >> $GITHUB_STEP_SUMMARY
-
-  security-report:
-    name: Generate Advanced Security Report
-    runs-on: ubuntu-latest
-    needs: merge
-    steps:
-      - uses: jfrog/setup-jfrog-cli@v4
-        env:
-          JF_URL: ${{ vars.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-
-      - run: mkdir -p reports
+          set -euo pipefail
+          for f in *.json; do
+            jf rt ba $BUILD_NAME $BUILD_NUMBER $BUILD_NAME $BUILD_NUMBER --spec=$f || true
+          done
+          jf rt bp $BUILD_NAME $BUILD_NUMBER --overwrite --detailed-summary
 
       - name: Trigger Xray scan
-        run: |
-          jf xr curl -XPOST /api/v2/ci/build \
-            -H "Content-Type: application/json" \
-            -d "{\"build_name\":\"$BUILD_NAME\",\"build_number\":\"$BUILD_NUMBER\"}"
+        run: jf xr curl -XPOST "/api/v2/ci/build" -H "Content-Type: application/json" -d "{\"build_name\":\"$BUILD_NAME\",\"build_number\":\"$BUILD_NUMBER\"}"
 
       - name: Create vulnerabilities report
         id: vuln_report
         run: |
-          body=$(jq -n \
-            --arg name "report-$BUILD_NAME-$BUILD_NUMBER" \
-            --arg bn "$BUILD_NAME" \
-            --argjson latest 1 \
-            '{name:$name,resources:{builds:{names:[$bn],number_of_latest_versions:$latest}},filters:{severities:["Critical","High","Medium","Low"]}}')
-          
+          set -euo pipefail
+          body=$(cat <<EOF
+          {
+            "name": "report-$BUILD_NAME-$BUILD_NUMBER",
+            "resources": {
+              "builds": {
+                "names": ["$BUILD_NAME"],
+                "number_of_latest_versions": 1
+              }
+            },
+            "filters": {
+              "severities": ["Critical","High","Medium","Low"]
+            }
+          }
+          EOF
+          )
+          echo "Payload: $body"
           resp=$(jf xr curl -XPOST /api/v1/reports/vulnerabilities -H "Content-Type: application/json" -d "$body")
           echo "Response: $resp" | tee resp.json
-
           rid=$(echo "$resp" | jq -r '.report_id // empty')
-          [ -z "$rid" ] && { echo "❌ No report_id"; exit 1; }
-
+          [ -z "$rid" ] && { echo "❌ Error creating vulnerabilities report"; exit 1; }
           echo "rid=$rid" >> $GITHUB_OUTPUT
 
-      - name: Wait until report is ready
+      - name: Download vulnerabilities report
         run: |
-          rid="${{ steps.vuln_report.outputs.rid }}"
-          for i in {1..60}; do
-            status=$(jf xr curl -XGET "/api/v1/reports/$rid" | jq -r .status)
-            echo "Status: $status"
-            case "$status" in
-              completed) break ;;
-              failed) echo "❌ Report failed"; exit 1 ;;
-            esac
-            sleep 5
-          done
+          set -euo pipefail
+          jf xr curl -XGET "/api/v1/reports/vulnerabilities/${{ steps.vuln_report.outputs.rid }}/download" --output vuln-report.json
+          cat vuln-report.json | jq > vuln-report.pretty.json
 
-      - name: Export vulnerabilities report
+      - name: Generate SBOM (CycloneDX)
         run: |
-          rid="${{ steps.vuln_report.outputs.rid }}"
-          jf xr curl -XGET "/api/v1/reports/export/$rid?format=pdf&file_name=$BUILD_NAME-$BUILD_NUMBER-vuln" \
-            > "reports/$BUILD_NAME-$BUILD_NUMBER-vuln-report.zip"
-
-      - name: Export Build details (PDF + SBOMs)
-        run: |
-          jf xr curl -XPOST /api/v2/component/exportDetails \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"package_type\": \"build\",
-              \"component_name\": \"$BUILD_NAME:$BUILD_NUMBER\",
-              \"path\": \"artifactory-build-info/$BUILD_NAME\",
-              \"vulnerabilities\": true,
-              \"license\": true,
-              \"operational_risk\": true,
-              \"output_format\": \"pdf\",
-              \"cyclonedx\": true,
-              \"cyclonedx_format\": \"json\",
-              \"spdx\": true,
-              \"spdx_format\": \"json\"
-            }" > "reports/$BUILD_NAME-$BUILD_NUMBER-export-details.zip"
+          set -euo pipefail
+          jf xr curl -XPOST /api/v1/sbomExport -H "Content-Type: application/json" -d "{
+            \"export_format\": \"cyclonedx\",
+            \"resources\": {
+              \"builds\": [
+                { \"name\": \"$BUILD_NAME\", \"number\": \"$BUILD_NUMBER\" }
+              ]
+            }
+          }" --output sbom.json
 
       - uses: actions/upload-artifact@v4
         with:
-          name: xray-advanced-${{ env.BUILD_NAME }}-${{ env.BUILD_NUMBER }}
-          path: reports/*
+          name: reports
+          path: |
+            vuln-report.json
+            vuln-report.pretty.json
+            sbom.json
