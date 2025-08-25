@@ -1,4 +1,4 @@
-name: Third WF Parallel Artifacts 
+name: Third WF Parallel Artifacts
 
 on:
   push:
