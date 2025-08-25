@@ -200,16 +200,46 @@ jobs:
           BUILD_NAME: new-build
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          # Crea el reporte (resources -> type=build)
+          body=$(cat <<EOF
+          {
+            "name": "report-${BUILD_NAME}-${BUILD_NUMBER}",
+            "resources": {
+              "builds": {
+              "names": ["${BUILD_NAME}"],
+                "include_patterns": ["${BUILD_NUMBER}"],
+                "number_of_latest_versions": 1
+              }
+            },
+            "filters": {
+              "severities": ["Critical","High","Medium","Low"]
+            }
+          }
+          EOF
+          )
+
+          echo "Request body:"
+          echo "$body" | jq .
+
           resp=$(jf xr curl -XPOST /api/v1/reports/vulnerabilities \
-            -H "Content-Type: application/json" \
-            -d "{
-                  \"name\": \"vuln-${BUILD_NAME}-${BUILD_NUMBER}\",
-                  \"filters\": { \"severities\": [\"Critical\",\"High\",\"Medium\",\"Low\"] },
-                  \"resources\": { \"builds\": { \"names\": [ \"${BUILD_NAME}\" ], "number_of_latest_versions": 1 }
-                }")
-          echo "$resp" | jq .
-          rid=$(echo "$resp" | jq -r .report_id)
+                    -H "Content-Type: application/json" \
+                    -d "$body")
+      
+          echo "Raw response: $resp" | tee resp.json
+      
+          err=$(echo "$resp" | jq -r '.error? // empty')
+          if [ -n "$err" ]; then
+            echo "❌ Error creating vulnerabilities report: $err" >&2
+            exit 1
+          fi
+
+          rid=$(echo "$resp" | jq -r '.report_id?')
+          if [ -z "$rid" ] || [ "$rid" = "null" ]; then
+            echo "❌ No report_id found in response" >&2
+            cat resp.json
+            exit 1
+          fi
+
+          echo "✅ Report created with id: $rid"
           echo "rid=$rid" >> $GITHUB_OUTPUT
 
       - name: Wait until report is completed
