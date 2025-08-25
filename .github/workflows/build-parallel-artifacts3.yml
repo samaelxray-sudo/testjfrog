@@ -192,7 +192,7 @@ jobs:
             "export_format": "pdf"
           }' > report.json
 
-          jf xr curl -XPOST /api/v1/reports/security \
+          jf xr curl -XPOST /api/v1/reports/vulnerabilities \
             -H "Content-Type: application/json" \
             -d @report.json > report-job.json
 
@@ -201,7 +201,7 @@ jobs:
 
       - name: Download Security Report (ZIP with PDF)
         run: |
-          jf xr curl -XGET "/api/v1/reports/security/${REPORT_ID}/download" \
+          jf xr curl -XGET "/api/v1/reports/vulnerabilities/${REPORT_ID}/download" \
             --output build-report.zip
 
       - name: Export SBOM (CycloneDX)
