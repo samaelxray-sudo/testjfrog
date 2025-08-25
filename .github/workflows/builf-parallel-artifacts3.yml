@@ -1,0 +1,228 @@
+name: Second WF Parallel Artifacts 
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-parallel-artifacts2.yml
+jobs:
+  discover-services:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.set-services.outputs.services }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Discover services dynamically
+        id: set-services
+        run: |
+          # 🔽 Aquí calculas tu lista dinámicamente
+          SERVICES="image-1 image-2 image-3"
+
+          # Convertimos la lista a JSON: ["image-1","image-2","image-3"]
+          SERVICES_JSON=$(printf '["%s"]' "$(echo $SERVICES | sed 's/ /","/g')")
+
+          echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
+          echo "Discovered services: $SERVICES_JSON"
+
+  build:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: discover-services
+    strategy:
+      matrix:
+        image: ${{ fromJson(needs.discover-services.outputs.services) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+
+      - name: Build and Push Docker image
+        env:
+          IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
+        run: |
+          echo "Building $IMAGE_NAME"
+          jf docker login samaelxray.jfrog.io -u samaelxray@gmail.com -p ${{ secrets.JF_ACCESS_TOKEN }}
+          jf docker build -t $IMAGE_NAME ./microservices/${{ matrix.image }}
+          jf docker push $IMAGE_NAME
+
+      - name: Create image-file.txt with digest
+        env:
+          IMAGE_NAME: samaelxray.jfrog.io/test-docker-local/${{ matrix.image }}:${{ github.run_number }}
+        run: |
+          # 3) Obtener el digest del MANIFEST (línea esperada por bdc: '<IMAGE>@sha256:<MANIFEST>')
+          DIGEST="$(docker buildx imagetools inspect "${IMAGE_NAME}" | awk '/Digest:/ {print $2; exit}')"
+          if [ -z "${DIGEST}" ]; then
+            echo "No pude obtener el digest del manifest de ${IMAGE}"
+            exit 1
+          fi
+          echo "/************ Image ***********/"
+          echo "${IMAGE_NAME}@${DIGEST}"
+          echo "${IMAGE_NAME}@${DIGEST}" > image.txt
+
+      - name: Add Docker image to Build Info
+        run: |
+          # 4) Registrar el módulo docker EN LOCAL en la misma build
+          #    (OJO: sintaxis correcta de 2.78.3: --image-file y al final el <target repo>)
+          jf rt bdc \
+            --image-file=image.txt \
+            --build-name=new-build \
+            --build-number=${{ github.run_number }} \
+            --module=${{ matrix.image }} \
+            test-docker-local
+
+          # (Opcional) Variables de entorno/VCS si quieres que salgan en la build:
+          # jf rt bce "${BUILD_NAME}" "${BUILD_NUMBER}"
+          # jf rt bag "${BUILD_NAME}" "${BUILD_NUMBER}" || true   # solo si hay .git, si no, ignora
+
+          # 5) Sacar el JSON previo de ESTA build local (contiene SOLO el módulo de este servicio)
+          mkdir -p jfrog-parts
+          echo "Sacar el JSON previo de ESTA build local (contiene SOLO el módulo de este servicio)"
+          jf rt bp new-build ${{ github.run_number }} --dry-run > "jfrog-parts/${{ matrix.image }}.json"
+          cat jfrog-parts/${{ matrix.image }}.json
+
+          # 6) Subir el JSON como artefacto del job (actions/upload-artifact@v4)
+      - name: Upload partial build-info
+        uses: actions/upload-artifact@v4
+        with:
+          name: jfrog-part-${{ matrix.image }}   # nombre único por servicio
+          path: jfrog-parts/${{ matrix.image }}.json
+          retention-days: 1                        # opcional, se borran rápido
+
+  merge:
+    name: Merge build-infos and publish
+    runs-on: ubuntu-latest
+    needs: [discover-services, build]    
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+
+      - name: Download parts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: jfrog-part-*
+          merge-multiple: true
+
+      - name: Merge modules
+        run: |
+          jq -s '{
+            name:       (.[0].name),
+            number:     (.[0].number),
+            started:    (.[0].started),
+            url:        (.[0].url),
+            agent:      (.[0].agent),
+            buildAgent: (.[0].buildAgent),
+            properties: (reduce .[].properties as $p ({}; . * ($p // {}))),
+            modules:    (map(.modules) | add)
+          }' *.json > merged.json
+
+      - name: Publish build-info
+        run: |
+          jf rt curl -X PUT "/api/build" \
+            -H "Content-Type: application/json" \
+            -T merged.json
+            
+      - name: Xray scan (JSON) y SBOM (CycloneDX)
+        env:
+          BUILD_NAME: new-build
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          # Reporte de seguridad (JSON) 
+          jf bs "$BUILD_NAME" "$BUILD_NUMBER" --vuln --format=json --fail=false > build-security.json
+
+          # SBOM en formato CycloneDX (JSON)
+          jf bs "$BUILD_NAME" "$BUILD_NUMBER" --format=cyclonedx --fail=false > build-sbom.cdx.json
+      
+      - name: Subir artefactos (reporte y SBOM)
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ env.BUILD_NAME }}-${{ env.BUILD_NUMBER }}-xray-and-sbom"
+          path: |
+            build-security.json
+            build-sbom.cdx.json
+          retention-days: 14
+
+      - name: Resumen rápido en el Job Summary
+        env:
+          BUILD_NAME: new-build
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          {
+            echo "### Xray para $BUILD_NAME/$BUILD_NUMBER";
+            echo "- Reporte (JSON): \`build-security.json\`";
+            echo "- SBOM CycloneDX (JSON): \`build-sbom.cdx.json\`";
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  security-report:
+    name: Generate Security Report & SBOM
+    runs-on: ubuntu-latest
+    needs: [discover-services, build, merge]   # depende del job donde publicas y escaneas la build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.JF_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+
+      - name: Request Security Report (PDF)
+        run: |
+          echo '{
+            "name": "new-build-report",
+            "resources": {
+              "builds": [
+                { "name": "new-build", "number": "${{ github.run_number }}" }
+              ]
+            },
+            "export_format": "pdf"
+          }' > report.json
+
+          jf xr curl -XPOST /api/v1/reports/security \
+            -H "Content-Type: application/json" \
+            -d @report.json > report-job.json
+
+          REPORT_ID=$(jq -r '.report_id' report-job.json)
+          echo "REPORT_ID=$REPORT_ID" >> $GITHUB_ENV
+
+      - name: Download Security Report (ZIP with PDF)
+        run: |
+          jf xr curl -XGET "/api/v1/reports/security/${REPORT_ID}/download" \
+            --output build-report.zip
+
+      - name: Export SBOM (CycloneDX)
+        run: |
+          echo '{
+            "export_format": "cyclonedx",
+            "resources": {
+              "builds": [
+                { "name": "new-build", "number": "${{ github.run_number }}" }
+              ]
+            }
+          }' > sbom.json
+
+          jf xr curl -XPOST /api/v1/sbomExport \
+            -H "Content-Type: application/json" \
+            -d @sbom.json --output sbom.json
+
+      - name: Upload artifacts to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            build-report.zip
+            sbom.json
