@@ -180,49 +180,97 @@ jobs:
           JF_URL: ${{ vars.JF_URL }}
           JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
 
-      - name: Request Security Report (PDF)
+      - name: Ensure out dir
+        run: mkdir -p reports
+      
+      # 1) (Opcional) Forzar escaneo de la build por Xray - V2
+      - name: Trigger Xray scan (optional)
+        env:
+          BUILD_NAME: new-build
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          echo '{
-            "name": "new-build-report",
-            "resources": {
-              "builds": [
-                { "name": "new-build", "number": "${{ github.run_number }}" }
-              ]
-            },
-            "export_format": "pdf"
-          }' > report.json
-
-          jf xr curl -XPOST /api/v1/reports/vulnerabilities \
+          jf xr curl -XPOST /api/v2/ci/build/scan \
             -H "Content-Type: application/json" \
-            -d @report.json > report-job.json
-
-          REPORT_ID=$(jq -r '.report_id' report-job.json)
-          echo "REPORT_ID=$REPORT_ID" >> $GITHUB_ENV
-
-      - name: Download Security Report (ZIP with PDF)
+            -d "{\"build_name\":\"${BUILD_NAME}\",\"build_number\":\"${BUILD_NUMBER}\"}" | jq .
+      
+      # 2) Vulnerabilities Report (API v1) -> Export PDF
+      - name: Create vulnerabilities report
+        id: vuln_report
+        env:
+          BUILD_NAME: new-build
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          jf xr curl -XGET "/api/v1/reports/vulnerabilities/${REPORT_ID}/download" \
-            --output build-report.zip
-
-      - name: Export SBOM (CycloneDX)
-        run: |
-          echo '{
-            "export_format": "cyclonedx",
-            "resources": {
-              "builds": [
-                { "name": "new-build", "number": "${{ github.run_number }}" }
-              ]
-            }
-          }' > sbom.json
-
-          jf xr curl -XPOST /api/v1/sbomExport \
+          # Crea el reporte (resources -> type=build)
+          resp=$(jf xr curl -XPOST /api/v1/reports/vulnerabilities \
             -H "Content-Type: application/json" \
-            -d @sbom.json --output sbom.json
+            -d "{
+                  \"name\": \"vuln-${BUILD_NAME}-${BUILD_NUMBER}\",
+                  \"filters\": { \"severities\": [\"Critical\",\"High\",\"Medium\",\"Low\"] },
+                  \"resources\": [ { \"type\": \"build\", \"name\": \"${BUILD_NAME}\", \"version\": \"${BUILD_NUMBER}\" } ]
+                }")
+          echo "$resp" | jq .
+          rid=$(echo "$resp" | jq -r .report_id)
+          echo "rid=$rid" >> $GITHUB_OUTPUT
 
-      - name: Upload artifacts to GitHub
+      - name: Wait until report is completed
+        env:
+          BUILD_NAME: new-build
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          rid="${{ steps.vuln_report.outputs.rid }}"
+          echo "Waiting for report $rid ..."
+          for i in {1..60}; do
+            status=$(jf xr curl -XGET "/api/v1/reports/${rid}" | jq -r .status)
+            echo "Status: $status"
+            if [ "$status" = "completed" ]; then
+              break
+            fi
+            if [ "$status" = "failed" ]; then
+              echo "Report failed" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Export vulnerabilities report as PDF
+        env:
+          BUILD_NAME: new-build
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          rid="${{ steps.vuln_report.outputs.rid }}"
+          # Export: devuelve application/zip u octet-stream; si pides PDF te entrega un PDF dentro del ZIP o PDF directo según tamaño.
+          jf xr curl -XGET "/api/v1/reports/export/${rid}?format=pdf&file_name=${BUILD_NAME}-${BUILD_NUMBER}-vuln" > "reports/${BUILD_NAME}-${BUILD_NUMBER}-vuln-report.zip"
+          ls -l reports
+
+      # 3) Export Component Details V2 -> PDF + SBOM (CycloneDX JSON + SPDX JSON) en un ZIP
+      #    Para toda la build (más sencillo que ir imagen por imagen).
+      - name: Export Build details (PDF + SBOMs)
+        env:
+          BUILD_NAME: new-build
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          # Para builds SIN proyectos: el path suele ser "artifactory-build-info/<build-name>"
+          # Si usas Projects, sería "<ProjectKey>-build-info/<build-name>" (ajústalo si aplica).
+          jf xr curl -XPOST /api/v2/component/exportDetails \
+            -H "Content-Type: application/json" \
+            -d "{
+                  \"package_type\": \"build\",
+                  \"component_name\": \"${BUILD_NAME}:${BUILD_NUMBER}\",
+                  \"path\": \"artifactory-build-info/${BUILD_NAME}\",
+                  \"vulnerabilities\": true,
+                  \"license\": true,
+                  \"operational_risk\": true,
+                  \"output_format\": \"pdf\",
+                  \"cyclonedx\": true,
+                  \"cyclonedx_format\": \"json\",
+                  \"spdx\": true,
+                  \"spdx_format\": \"json\"
+                }" > "reports/${BUILD_NAME}-${BUILD_NUMBER}-export-details.zip"
+          ls -l reports
+
+      - name: Upload reports as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: security-reports
-          path: |
-            build-report.zip
-            sbom.json
+          name: xray-reports-${{ env.BUILD_NAME }}-${{ env.BUILD_NUMBER }}
+          path: reports/*
+
