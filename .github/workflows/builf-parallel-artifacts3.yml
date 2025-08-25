@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - .github/workflows/build-parallel-artifacts2.yml
+      - .github/workflows/build-parallel-artifacts3.yml
 jobs:
   discover-services:
     runs-on: ubuntu-latest
