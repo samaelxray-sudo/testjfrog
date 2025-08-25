@@ -206,7 +206,7 @@ jobs:
             -d "{
                   \"name\": \"vuln-${BUILD_NAME}-${BUILD_NUMBER}\",
                   \"filters\": { \"severities\": [\"Critical\",\"High\",\"Medium\",\"Low\"] },
-                  \"resources\": [ { \"type\": \"build\", \"name\": \"${BUILD_NAME}\", \"version\": \"${BUILD_NUMBER}\" } ]
+                  \"resources\": { \"builds\": { \"names\": [ \"${BUILD_NAME}\" ], "number_of_latest_versions": 1 }
                 }")
           echo "$resp" | jq .
           rid=$(echo "$resp" | jq -r .report_id)
